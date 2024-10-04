@@ -1,4 +1,4 @@
-# RGB To Gray Image Converter
+# Simple Linear Blur using CUDA programming
 In this project, a simple Linear Blur to Blur an image using CUDA programming has been implemented. The project is implemented using CUDA programming and the code is written in C++.
 
 ## Details
