@@ -1,4 +1,4 @@
-/*This approximates the block edge case too by averaging only 2 pixels. this and other pixel on left/right*/
+/*This approximates the block edge case by averaging only 2 pixels. this and other pixel on left/right*/
 /*
  * Copyright 1993-2015 NVIDIA Corporation.  All rights reserved.
  *
