@@ -1,4 +1,4 @@
-/*This approximates the block edge case too by averaging only 2 pixels. this and other pixel on left/right*/
+/*This handles the block edge case too*/
 /*
  * Copyright 1993-2015 NVIDIA Corporation.  All rights reserved.
  *
@@ -43,19 +43,21 @@ __global__ void applySimpleLinearBlurFilter(uchar *r, uchar *g, uchar *b)
         b[d_columns*y+x] = ((int)b_old[threadIdx.x][threadIdx.y-1]+(int)b_old[threadIdx.x][threadIdx.y]+(int)b_old[threadIdx.x][threadIdx.y+1])/3;
     }
     // Another area for improvement is handling when the current thread is at the let or right edge of the imput image
-    else if(x>0 && x<d_columns-1 && (threadIdx.y+1)%16==0)
+    else if(x>0 && x<d_columns-1 && (threadIdx.y+1)%16==0 && y<d_rows)
     {
+        int id = blockIdx.y;
         //When pixel at right edge of the block
-        r[d_columns*y+x] = ((int)r_old[threadIdx.x][threadIdx.y-1]+(int)r_old[threadIdx.x][threadIdx.y])>>1;
-        g[d_columns*y+x] = ((int)g_old[threadIdx.x][threadIdx.y-1]+(int)g_old[threadIdx.x][threadIdx.y])>>1;
-        b[d_columns*y+x] = ((int)b_old[threadIdx.x][threadIdx.y-1]+(int)b_old[threadIdx.x][threadIdx.y])>>1;
+        r[d_columns*y+x] = ((int)r_old[threadIdx.x][threadIdx.y-1]+(int)r_old[threadIdx.x][threadIdx.y]+(int)r_e_even[y][id])/3;
+        g[d_columns*y+x] = ((int)g_old[threadIdx.x][threadIdx.y-1]+(int)g_old[threadIdx.x][threadIdx.y]+(int)g_e_even[y][id])/3;
+        b[d_columns*y+x] = ((int)b_old[threadIdx.x][threadIdx.y-1]+(int)b_old[threadIdx.x][threadIdx.y]+(int)b_e_even[y][id])/3;
     }
-    else if(x>0 && x<d_columns-1 && (threadIdx.y)%16==0)
+    else if(x>0 && x<d_columns-1 && (threadIdx.y)%16==0 && y<d_rows)
     {
+        int id = blockIdx.y;
         //When pixel at left edge of the block
-        r[d_columns*y+x] = ((int)r_old[threadIdx.x][threadIdx.y]+(int)r_old[threadIdx.x][threadIdx.y+1])>>1;
-        g[d_columns*y+x] = ((int)g_old[threadIdx.x][threadIdx.y]+(int)g_old[threadIdx.x][threadIdx.y+1])>>1;
-        b[d_columns*y+x] = ((int)b_old[threadIdx.x][threadIdx.y]+(int)b_old[threadIdx.x][threadIdx.y+1])>>1;
+        r[d_columns*y+x] = ((int)r_old[threadIdx.x][threadIdx.y]+(int)r_old[threadIdx.x][threadIdx.y+1]+(int)r_e_odd[y][id])/3;
+        g[d_columns*y+x] = ((int)g_old[threadIdx.x][threadIdx.y]+(int)g_old[threadIdx.x][threadIdx.y+1]+(int)g_e_odd[y][id])/3;
+        b[d_columns*y+x] = ((int)b_old[threadIdx.x][threadIdx.y]+(int)b_old[threadIdx.x][threadIdx.y+1]+(int)b_e_odd[y][id])/3;
     }
 }
 
@@ -104,6 +106,94 @@ __host__ void executeKernel(uchar *r, uchar *g, uchar *b, int rows, int columns,
     dim3 grid(gridDimy, gridDimx); //grid dimension
     dim3 block(16, 16); //block dimension
     
+    uchar **hr_e, **hg_e, **hb_e;
+    
+    uchar **hr_e_host, **hg_e_host, **hb_e_host;
+    hr_e_host = (uchar **)malloc(rows*sizeof(uchar*));
+    hg_e_host = (uchar **)malloc(rows*sizeof(uchar*));
+    hb_e_host = (uchar **)malloc(rows*sizeof(uchar*));
+
+    /*For odd allocation*/
+    cudaMalloc(&hr_e, rows*sizeof(uchar*));
+    cudaMalloc(&hg_e, rows*sizeof(uchar*));
+    cudaMalloc(&hb_e, rows*sizeof(uchar*));
+    for(int i=0;i<rows;i++)
+    {
+        cudaMalloc(&hr_e_host[i], (gridDimx)*sizeof(uchar));
+        cudaMalloc(&hg_e_host[i], (gridDimx)*sizeof(uchar));
+        cudaMalloc(&hb_e_host[i], (gridDimx)*sizeof(uchar));
+        uchar *temp_r, *temp_g, *temp_b;
+        temp_r = (uchar *)malloc((gridDimx)*sizeof(uchar));
+        temp_g = (uchar *)malloc((gridDimx)*sizeof(uchar));
+        temp_b = (uchar *)malloc((gridDimx)*sizeof(uchar));
+        for(int j=1;j<=gridDimx;j++)
+        {
+            int x = 16*j-1;
+            if(x<columns)
+            {
+                temp_r[j-1] = r[i*columns+x];
+                temp_g[j-1] = g[i*columns+x];
+                temp_b[j-1] = b[i*columns+x];
+            }
+        }
+        cudaMemcpy(hr_e_host[i], temp_r, gridDimx*sizeof(uchar), cudaMemcpyHostToDevice);
+        cudaMemcpy(hg_e_host[i], temp_g, gridDimx*sizeof(uchar), cudaMemcpyHostToDevice);
+        cudaMemcpy(hb_e_host[i], temp_b, gridDimx*sizeof(uchar), cudaMemcpyHostToDevice);
+        free(temp_r);
+        free(temp_g);
+        free(temp_b);
+    }
+
+    cudaMemcpy(hr_e, hr_e_host, rows * sizeof(uchar*), cudaMemcpyHostToDevice);
+    cudaMemcpy(hg_e, hg_e_host, rows * sizeof(uchar*), cudaMemcpyHostToDevice);
+    cudaMemcpy(hb_e, hb_e_host, rows * sizeof(uchar*), cudaMemcpyHostToDevice);
+
+    cudaMemcpyToSymbol(r_e_odd, &hr_e, sizeof(uchar **));
+    cudaMemcpyToSymbol(g_e_odd, &hg_e, sizeof(uchar **));
+    cudaMemcpyToSymbol(b_e_odd, &hb_e, sizeof(uchar **));
+
+    /*For even allocation*/
+    cudaMalloc(&hr_e, rows*sizeof(uchar*));
+    cudaMalloc(&hg_e, rows*sizeof(uchar*));
+    cudaMalloc(&hb_e, rows*sizeof(uchar*));
+    for(int i=0;i<rows;i++)
+    {
+        cudaMalloc(&hr_e_host[i], (gridDimx)*sizeof(uchar));
+        cudaMalloc(&hg_e_host[i], (gridDimx)*sizeof(uchar));
+        cudaMalloc(&hb_e_host[i], (gridDimx)*sizeof(uchar));
+        uchar *temp_r, *temp_g, *temp_b;
+        temp_r = (uchar *)malloc((gridDimx)*sizeof(uchar));
+        temp_g = (uchar *)malloc((gridDimx)*sizeof(uchar));
+        temp_b = (uchar *)malloc((gridDimx)*sizeof(uchar));
+        for(int j=1;j<=gridDimx;j++)
+        {
+            int x = 16*j;
+            if(x<columns)
+            {
+                temp_r[j-1] = r[i*columns+x];
+                temp_g[j-1] = g[i*columns+x];
+                temp_b[j-1] = b[i*columns+x];
+            }
+        }
+        cudaMemcpy(hr_e_host[i], temp_r, gridDimx*sizeof(uchar), cudaMemcpyHostToDevice);
+        cudaMemcpy(hg_e_host[i], temp_g, gridDimx*sizeof(uchar), cudaMemcpyHostToDevice);
+        cudaMemcpy(hb_e_host[i], temp_b, gridDimx*sizeof(uchar), cudaMemcpyHostToDevice);
+        free(temp_r);
+        free(temp_g);
+        free(temp_b);
+    }
+    cudaMemcpy(hr_e, hr_e_host, rows * sizeof(uchar*), cudaMemcpyHostToDevice);
+    cudaMemcpy(hg_e, hg_e_host, rows * sizeof(uchar*), cudaMemcpyHostToDevice);
+    cudaMemcpy(hb_e, hb_e_host, rows * sizeof(uchar*), cudaMemcpyHostToDevice);
+    
+    cudaMemcpyToSymbol(r_e_even, &hr_e, sizeof(uchar **));
+    cudaMemcpyToSymbol(g_e_even, &hg_e, sizeof(uchar **));
+    cudaMemcpyToSymbol(b_e_even, &hb_e, sizeof(uchar **));
+
+    // Free the host-side arrays
+    free(hr_e_host);
+    free(hg_e_host);
+    free(hb_e_host);
     cudaError_t errBefore = cudaGetLastError();
     if (errBefore != cudaSuccess) 
     {
