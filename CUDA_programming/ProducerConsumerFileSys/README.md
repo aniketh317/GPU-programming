@@ -1,0 +1,3 @@
+## ProducerConsumerFileBased
+
+In this project 2 producer processes a,b (Python) produce values in input_a.csv, input_b.csv. The Cuda application consumes these values to produce comparison results. The comparison results are written to output_a.csv, output_b.csv. Lock files are used to synchronize the access to the files. That is CUDA application will consume values only when the producer has produced the values for the next iteration. Similarly the producer will produce values only when the CUDA application has consumed the values for the current iteration and produced a result in the output files.
